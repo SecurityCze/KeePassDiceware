@@ -187,8 +187,7 @@ namespace KeePassDiceware
 
 		private void EditSaltSourcesButton_Click(object sender, EventArgs e)
 		{
-			SaltSourcesForm ssf = new();
-			ssf.PopulateSaltSources(_saltSources);
+			SaltSourcesForm ssf = new(_saltSources);
 
 			if (ssf.ShowDialog(this) == DialogResult.Cancel)
 			{

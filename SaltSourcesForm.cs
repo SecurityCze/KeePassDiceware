@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Data;
 using System.Linq;
 using System.Windows.Forms;
+using System.Xml.Linq;
 
 using KeePass.UI;
 
@@ -10,38 +12,21 @@ namespace KeePassDiceware
 {
 	public partial class SaltSourcesForm : Form
 	{
-		public List<SaltSource> Result { get; private set; } = null;
-		private BindingList<SaltSource> DataSource { get; set; } = null;
 
-		internal bool DataValid
-		{
-			get => okButton.Enabled;
-			set => okButton.Enabled = value;
-		}
+		public List<SaltSource> Result;
 
-		private readonly List<DataGridViewCell> _pendingErrors = new();
+		private BindingList<SaltSource> _saltSourcesBindingList;
 
-		public SaltSourcesForm()
+		public SaltSourcesForm(List<SaltSource> initialSaltSources)
 		{
 			InitializeComponent();
 			SaltSourceDataGridView.AutoGenerateColumns = false;
-		}
-
-		protected override void OnLoad(EventArgs e)
-		{
-			base.OnLoad(e);
-			GlobalWindowManager.AddWindow(this);
-		}
-
-		protected override void OnClosed(EventArgs e)
-		{
-			base.OnClosed(e);
-			GlobalWindowManager.RemoveWindow(this);
+			SaltSourceDataGridView.AllowUserToAddRows = true;
+			PopulateSaltSources(initialSaltSources);
 		}
 
 		private void OkButton_Click(object sender, EventArgs e)
 		{
-			Result = DataSource.ToList();
 			DialogResult = DialogResult.OK;
 			Close();
 		}
@@ -67,116 +52,24 @@ namespace KeePassDiceware
 			}
 		}
 
-		internal void PopulateSaltSources(List<SaltSource> saltSources)
+		private void PopulateSaltSources(List<SaltSource> initialSaltSources)
 		{
-			_pendingErrors.Clear();
+			List<SaltSource> renderableSaltSources = initialSaltSources.Where(ss => ss.CanRender).ToList();
+			Result = renderableSaltSources.ConvertAll(ss => (SaltSource)ss.Clone());
 
-			int totalCount = saltSources.Count;
-
-			saltSources = saltSources.Where(ss => ss.CanRender).ToList();
-
-			int removed = totalCount - saltSources.Count;
-
+			int removed = initialSaltSources.Count - Result.Count;
 			if (removed > 0)
 			{
 				string removedS = removed == 1 ? string.Empty : "s";
 				string removedHelpingVerb = removed == 1 ? "was" : "were";
-				MessageBox.Show(this, $"{removed} salt source{removedS} {removedHelpingVerb} removed because they are not supported by the current runtime.",
+				string removedPronoun = removed == 1 ? "it is" : "they are";
+				MessageBox.Show(this, $"{removed} salt source{removedS} {removedHelpingVerb} removed because {removedPronoun} not supported by the current runtime.",
 					$"Unsupported Source{removedS} Removed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 			}
 
-			DataSource = new(saltSources.ConvertAll(ss => ss.Clone() as SaltSource))
-			{
-				AllowNew = true,
-				AllowRemove = true,
-				AllowEdit = true,
-			};
+			_saltSourcesBindingList = new(Result);
 
-			DataSource.AddingNew += DataSource_AddingNew;
-			DataSource.ListChanged += DataSource_ListChanged;
-
-			SaltSourceDataGridView.DataSource = DataSource;
-
-			BindingSource bindingSource = new(DataSource, null);
-			SaltSourceDataGridView.DataSource = bindingSource;
-
-			CheckValidation();
-		}
-
-		private void DataSource_ListChanged(object sender, ListChangedEventArgs e) => CheckValidation();
-
-		private void DataSource_AddingNew(object sender, AddingNewEventArgs e)
-		{
-			SaltSource created = new()
-			{
-				Name = "New Source"
-			};
-
-			e.NewObject = created;
-		}
-
-		private void SaltSourceDataGridView_CellMouseUp(object sender, DataGridViewCellMouseEventArgs e)
-		{
-			// End of edition on each click on column of checkbox
-			if (e.ColumnIndex == SourceEnabled.Index && e.RowIndex != -1)
-			{
-				SaltSourceDataGridView.EndEdit();
-			}
-		}
-
-		private void SaltSourceDataGridView_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
-		{
-			// End of edition on each click on column of checkbox
-			if (e.ColumnIndex == SourceEnabled.Index && e.RowIndex != -1)
-			{
-				SaltSourceDataGridView.EndEdit();
-			}
-		}
-
-		private void SaltSourceDataGridView_CellValidated(object sender, DataGridViewCellEventArgs e)
-		{
-			if (e.ColumnIndex < 0 || e.RowIndex < 0)
-			{
-				return;
-			}
-
-			CheckValidation();
-		}
-
-		private void CheckValidation()
-		{
-			int nameErrors = ValidateSourceNames();
-			DataValid = nameErrors == 0;
-		}
-
-		private int ValidateSourceNames()
-		{
-			int errors = 0;
-
-			foreach (DataGridViewRow row in SaltSourceDataGridView.Rows)
-			{
-				if (row is null)
-				{
-					continue;
-				}
-
-				if (row.DataBoundItem is not SaltSource ss)
-				{
-					continue;
-				}
-
-				if (DataSource.Count(oss => oss.Key == ss.Key) < 2)
-				{
-					row.ErrorText = string.Empty;
-				}
-				else
-				{
-					row.ErrorText = "This source's name is too similar to another source. Please make it more unique.";
-					errors++;
-				}
-			}
-
-			return errors;
+			SaltSourceDataGridView.DataSource = _saltSourcesBindingList;
 		}
 
 		private void RestoreDefaultsButton_Click(object sender, EventArgs e)
@@ -185,6 +78,27 @@ namespace KeePassDiceware
 				? SaltSource.DefaultSources
 				: SaltSource.DefaultSourcesWithoutEmoji
 			);
+		}
+
+		private void SaltSourceDataGridView_RowValidating(object sender, DataGridViewCellCancelEventArgs e)
+		{
+			DataGridViewRow row = SaltSourceDataGridView.Rows[e.RowIndex];
+
+			if (row.DataBoundItem is SaltSource ss)
+			{
+				if (Result.Count(oss => oss.Key == ss.Key) >= 2)
+				{
+					row.ErrorText = "This source's name is too similar to another source. Please make it more unique.";
+					e.Cancel = true;
+				}
+			}
+		}
+
+		private void SaltSourceDataGridView_RowValidated(object sender, DataGridViewCellEventArgs e)
+		{
+			DataGridViewRow row = SaltSourceDataGridView.Rows[e.RowIndex];
+			row.ErrorText = string.Empty;
+
 		}
 	}
 }

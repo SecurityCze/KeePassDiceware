@@ -111,6 +111,10 @@ namespace KeePassDiceware
 
 		public SaltSource()
 		{
+			Name = "New source";
+			MinimumAmount = 0;
+			MaximumAmount = 1;
+			Pool = "";
 			Enabled = true;
 		}
 
